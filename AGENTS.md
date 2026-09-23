@@ -14,7 +14,7 @@ Secrets: repo Settings → Secrets → `AMAP_API_KEY` (Web服务 key, never in f
 
 ## Architecture
 
-- `index.html` (root, Pages entry) — Leaflet + OSM (WGS84), Bootstrap CDN. Loads `./candidates.json`, auto-lottery (20-step roll → winner marker). `换一家` = local re-pick, `刷新数据` = re-fetch json.
+- `index.html` (root, Pages entry) — Leaflet + **AMap raster tiles (GCJ02)** via bootcdn (OSM/unpkg are blocked on China mobile networks). Converts `candidates.json` WGS84→GCJ02 in-page (`toGcjLatLng`, same math as fetch script). `换一家` = local re-pick, `刷新数据` = re-fetch json.
 - `candidates.json` (root, committed) — `{"updated_at" (Beijing), "center": {WGS84}, "count", "results": [...]}`. Generated, but must be committed for Pages.
 - `scripts/fetch_lunch.py` — AMap `place/around` (`keywords=美食`, `types=050000`, `RADIUS=800`, 3 pages x 25). Fixed `CENTER_GCJ02=(114.061104,22.573133)` = 深圳新一代产业园. Converts POIs GCJ02→WGS84 for Leaflet.
 - `.github/workflows/refresh-lunch.yml` — workdays 10:00-14:00 Beijing every 30min + manual + push trigger; commits refreshed `candidates.json`.
