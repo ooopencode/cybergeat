@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>今天中午吃啥？</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.css" />
     <style>
         body, html { height: 100%; margin: 0; padding: 0; overflow: hidden; }
         #map { height: 100%; width: 100%; z-index: 1; }
@@ -48,13 +48,44 @@
     <p id="updated" class="text-muted mt-2 mb-0" style="font-size:12px"></p>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script>
     // 纯前端：数据来自同目录 candidates.json（由 GitHub Actions 定时生成），无后端，不暴露 key
-    const map = L.map('map', { zoomControl: true }).setView([22.5758, 114.0560], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors', maxZoom: 19
+    // 底图用高德（国内可访问）；高德瓦片是 GCJ02，json 存的是 WGS84，展示前统一转 GCJ02
+    const map = L.map('map', { zoomControl: true }).setView([22.5731, 114.0611], 15);
+    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+        subdomains: ['1', '2', '3', '4'],
+        attribution: '© 高德地图 AutoNavi', maxZoom: 18
     }).addTo(map);
+
+    // WGS84 -> GCJ02（与 scripts/fetch_lunch.py 同算法，仅用于前端展示）
+    const _PI = Math.PI, _A = 6378245.0, _EE = 0.00669342162296594323;
+    function _trLat(lng, lat) {
+        let ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + 0.1 * lng * lat + 0.2 * Math.sqrt(Math.abs(lng));
+        ret += (20.0 * Math.sin(6.0 * lng * _PI) + 20.0 * Math.sin(2.0 * lng * _PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(lat * _PI) + 40.0 * Math.sin(lat / 3.0 * _PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(lat / 12.0 * _PI) + 320 * Math.sin(lat * _PI / 30.0)) * 2.0 / 3.0;
+        return ret;
+    }
+    function _trLng(lng, lat) {
+        let ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + 0.1 * lng * lat + 0.1 * Math.sqrt(Math.abs(lng));
+        ret += (20.0 * Math.sin(6.0 * lng * _PI) + 20.0 * Math.sin(2.0 * lng * _PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(lng * _PI) + 40.0 * Math.sin(lng / 3.0 * _PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(lng / 12.0 * _PI) + 300.0 * Math.sin(lng / 30.0 * _PI)) * 2.0 / 3.0;
+        return ret;
+    }
+    function toGcjLatLng(lat, lng) {
+        const dlat = _trLat(lng - 105.0, lat - 35.0);
+        const dlng = _trLng(lng - 105.0, lat - 35.0);
+        const radlat = lat / 180.0 * _PI;
+        let m = Math.sin(radlat);
+        m = 1 - _EE * m * m;
+        const sm = Math.sqrt(m);
+        return [
+            lat + (dlat * 180.0) / ((_A * (1 - _EE)) / (m * sm) * _PI),
+            lng + (dlng * 180.0) / ((_A / sm * Math.cos(radlat)) * _PI)
+        ];
+    }
 
     let candidates = [];
     let companyMarker = null;
@@ -81,10 +112,10 @@
 
     function placeWinnerMarker(place) {
         if (winnerMarker) map.removeLayer(winnerMarker);
-        winnerMarker = L.marker([place.lat, place.lng], {
+        winnerMarker = L.marker(toGcjLatLng(place.lat, place.lng), {
             icon: L.icon({
-                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-                shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                iconUrl: 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+                shadowUrl: 'https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
                 iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
                 className: 'red-marker-icon'
             })
@@ -127,9 +158,10 @@
                 return;
             }
             candidates = data.results;
-            map.setView([data.center.lat, data.center.lng], 16);
+            const centerGcj = toGcjLatLng(data.center.lat, data.center.lng);
+            map.setView(centerGcj, 16);
             if (companyMarker) map.removeLayer(companyMarker);
-            companyMarker = L.marker([data.center.lat, data.center.lng])
+            companyMarker = L.marker(centerGcj)
                 .bindPopup(`<b>📍 ${data.center.name}</b>`).addTo(map);
             updatedEl.innerText = data.updated_at ? `数据更新于 ${data.updated_at}（每30分钟自动更新）` : '';
             subtitle.innerText = `找到 ${candidates.length} 家，正在开奖…`;
