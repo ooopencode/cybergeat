@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>今天中午吃啥？</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+        .overlay-container {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; width: 90%; max-width: 500px;
+            background: rgba(255,255,255,0.95); padding: 20px; border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2); text-align: center;
+        }
+        .result-card {
+            display: none; margin-top: 15px; padding: 15px;
+            border: 2px solid #ff6b6b; border-radius: 10px; background-color: #fff0f0;
+            animation: popIn 0.3s ease-out;
+        }
+        @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .rolling { animation: pulse 0.1s infinite; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .red-marker-icon { filter: hue-rotate(140deg) brightness(0.9) saturate(1.5); }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="overlay-container">
+    <h3 class="mb-1">🍱 今天中午吃啥？</h3>
+    <p id="subtitle" class="text-muted small">正在为你开奖…</p>
+    <div id="result-display" class="result-card">
+        <h4 id="res-name" class="text-danger fw-bold"></h4>
+        <div class="d-flex justify-content-center gap-2 mt-2 flex-wrap">
+            <span class="badge bg-warning text-dark">⭐ <span id="res-rating"></span></span>
+            <span class="badge bg-secondary">💰 <span id="res-price"></span></span>
+            <span class="badge bg-info text-dark">📏 <span id="res-dist"></span></span>
+        </div>
+    </div>
+    <div class="d-flex gap-2 mt-3">
+        <button id="btn-reroll" class="btn btn-success w-100" disabled>🎲 换一家</button>
+        <button id="btn-refresh" class="btn btn-outline-primary w-100" disabled>↻ 刷新数据</button>
+    </div>
+    <p id="updated" class="text-muted mt-2 mb-0" style="font-size:12px"></p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // 纯前端：数据来自同目录 candidates.json（由 GitHub Actions 定时生成），无后端，不暴露 key
+    const map = L.map('map', { zoomControl: true }).setView([22.5758, 114.0560], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors', maxZoom: 19
+    }).addTo(map);
+
+    let candidates = [];
+    let companyMarker = null;
+    let winnerMarker = null;
+
+    const subtitle = document.getElementById('subtitle');
+    const updatedEl = document.getElementById('updated');
+    const resultDisplay = document.getElementById('result-display');
+    const btnReroll = document.getElementById('btn-reroll');
+    const btnRefresh = document.getElementById('btn-refresh');
+
+    function fmtRating(r) { return (r === null || r === undefined) ? '暂无评分' : r; }
+    function fmtPrice(p) { return (p === null || p === undefined) ? '价格暂无' : `¥${p}/人`; }
+
+    function showPlace(place, isRolling) {
+        const nameEl = document.getElementById('res-name');
+        nameEl.innerText = place.name;
+        nameEl.className = isRolling ? 'text-muted rolling' : 'text-danger fw-bold';
+        document.getElementById('res-rating').innerText = fmtRating(place.rating);
+        document.getElementById('res-price').innerText = fmtPrice(place.price);
+        document.getElementById('res-dist').innerText = `${place.distance}m`;
+        resultDisplay.style.display = 'block';
+    }
+
+    function placeWinnerMarker(place) {
+        if (winnerMarker) map.removeLayer(winnerMarker);
+        winnerMarker = L.marker([place.lat, place.lng], {
+            icon: L.icon({
+                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+                className: 'red-marker-icon'
+            })
+        }).bindPopup(`<b>${place.name}</b><br>评分: ${fmtRating(place.rating)}<br>人均: ${fmtPrice(place.price)}`);
+        winnerMarker.addTo(map);
+    }
+
+    function lottery() {
+        if (!candidates.length) return;
+        btnReroll.disabled = true;
+        resultDisplay.style.display = 'block';
+        let steps = 0;
+        const maxSteps = 20;
+        const timer = setInterval(() => {
+            showPlace(candidates[Math.floor(Math.random() * candidates.length)], true);
+            if (++steps >= maxSteps) {
+                clearInterval(timer);
+                const win = candidates[Math.floor(Math.random() * candidates.length)];
+                showPlace(win, false);
+                placeWinnerMarker(win);
+                winnerMarker.openPopup();
+                map.fitBounds(L.featureGroup([companyMarker, winnerMarker]).getBounds().pad(0.3));
+                subtitle.innerText = `共 ${candidates.length} 家候选，不满意就换一家`;
+                btnReroll.disabled = false;
+            }
+        }, 100);
+    }
+
+    async function loadLunch() {
+        btnReroll.disabled = true;
+        btnRefresh.disabled = true;
+        subtitle.innerText = '正在加载美食数据…';
+        resultDisplay.style.display = 'none';
+        try {
+            const res = await fetch(`./candidates.json?t=${Date.now()}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (!data.results || !data.results.length) {
+                subtitle.innerText = '数据还是空的，等 Actions 跑完再刷新试试';
+                return;
+            }
+            candidates = data.results;
+            map.setView([data.center.lat, data.center.lng], 16);
+            if (companyMarker) map.removeLayer(companyMarker);
+            companyMarker = L.marker([data.center.lat, data.center.lng])
+                .bindPopup(`<b>📍 ${data.center.name}</b>`).addTo(map);
+            updatedEl.innerText = data.updated_at ? `数据更新于 ${data.updated_at}（每30分钟自动更新）` : '';
+            subtitle.innerText = `找到 ${candidates.length} 家，正在开奖…`;
+            lottery();
+        } catch (e) {
+            console.error(e);
+            subtitle.innerText = '加载失败：candidates.json 不存在或网络问题';
+        } finally {
+            btnRefresh.disabled = false;
+        }
+    }
+
+    btnReroll.addEventListener('click', lottery);
+    btnRefresh.addEventListener('click', loadLunch);
+
+    loadLunch();
+</script>
+
+</body>
+</html>
